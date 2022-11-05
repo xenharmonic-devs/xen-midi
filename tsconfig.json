@@ -6,7 +6,11 @@
     "strict": true,
     "moduleResolution": "node",
     "resolveJsonModule": false,
-    "module": "CommonJS"
+    "module": "CommonJS",
+    "lib": [
+      "es2016",
+      "dom"
+    ]
   },
   "include": [
     "src/index.ts"
