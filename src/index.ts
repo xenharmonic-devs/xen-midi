@@ -1,31 +1,51 @@
-import type {NoteMessageEvent, Output} from 'webmidi';
+import type {NoteMessageEvent, Output, Input} from 'webmidi';
 import {ftom} from 'xen-dev-utils';
 
-export const bendRangeInSemitones = 2;
+/**
+ * Pitch bend range measured in semitones (+-).
+ */
+export const BEND_RANGE_IN_SEMITONES = 2;
 
 // Large but finite number to signify voices that are off
 const EXPIRED = 10000;
 
-// Abstraction for a pitch-bent midi channel. Polyphonic in pure octaves and 12edo in general.
+// Cents offset tolerance for channel reuse.
+const EPSILON = 1e-6;
+
+/**
+ * Abstraction for a pitch-bent midi channel.
+ * Polyphonic in pure octaves and 12edo in general.
+ */
 type Voice = {
   age: number;
   channel: number;
   centsOffset: number;
 };
 
-const EPSILON = 1e-6;
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function emptyNoteOff(rawRelease: number) {}
 
+/**
+ * Returned by MIDI note on. Turns the note off when called.
+ */
 export type NoteOff = typeof emptyNoteOff;
 
+/**
+ * Wrapper for a webmidi.js output.
+ * Uses multiple channels to achieve polyphonic microtuning.
+ */
 export class MidiOut {
   output: Output | null;
   channels: Set<number>;
   log: (msg: string) => void;
   private voices: Voice[];
 
+  /**
+   * Constuct a new wrapper for a webmidi.js output.
+   * @param output Output device or `null` if you need a dummy out.
+   * @param channels Channels to use for sending pitch bent MIDI notes. Number of channels determines maximum microtonal polyphony.
+   * @param log Logging function.
+   */
   constructor(
     output: Output | null,
     channels: Set<number>,
@@ -48,9 +68,27 @@ export class MidiOut {
         channel,
       });
     });
+
+    this.sendPitchBendRange();
   }
 
-  selectVoice(noteNumber: number, centsOffset: number) {
+  private sendPitchBendRange() {
+    if (this.output !== null) {
+      this.channels.forEach(channel => {
+        this.output!.channels[channel].sendPitchBendRange(
+          BEND_RANGE_IN_SEMITONES,
+          0
+        );
+      });
+    }
+  }
+
+  /**
+   * Select a voice that's using a cents offset combatible channel or the oldest voice if nothing can be re-used.
+   * @param centsOffset Cents offset (pitch-bend) from 12edo.
+   * @returns A voice for the next note-on event.
+   */
+  private selectVoice(centsOffset: number) {
     // Age signifies how many note ons have occured after voice intialization
     this.voices.forEach(voice => voice.age++);
 
@@ -75,7 +113,13 @@ export class MidiOut {
     return oldestVoice;
   }
 
-  sendNoteOn(frequency: number, rawAttack: number) {
+  /**
+   * Send a note-on event and pitch-bend to the output device in one of the available channels.
+   * @param frequency Frequency of the note in Hertz (Hz).
+   * @param rawAttack Attack velocity of the note in from 0 to 127.
+   * @returns A callback for sending a corresponding note off in the correct channel.
+   */
+  sendNoteOn(frequency: number, rawAttack: number): NoteOff {
     if (this.output === null) {
       return emptyNoteOff;
     }
@@ -86,7 +130,7 @@ export class MidiOut {
     if (noteNumber < 0 || noteNumber >= 128) {
       return emptyNoteOff;
     }
-    const voice = this.selectVoice(noteNumber, centsOffset);
+    const voice = this.selectVoice(centsOffset);
     this.log(
       `Sending note on ${noteNumber} at velocity ${
         rawAttack / 127
@@ -94,7 +138,7 @@ export class MidiOut {
         voice.channel
       } with bend ${centsOffset} resulting from frequency ${frequency}`
     );
-    const bendRange = bendRangeInSemitones * 100;
+    const bendRange = BEND_RANGE_IN_SEMITONES * 100;
     this.output.channels[voice.channel].sendPitchBend(centsOffset / bendRange);
     this.output.channels[voice.channel].sendNoteOn(noteNumber, {rawAttack});
 
@@ -113,14 +157,31 @@ export class MidiOut {
   }
 }
 
+/**
+ * Function to call when a MIDI note-on event is received (e.g. for turning on your synth).
+ * Attack velocity is from 0 to 127.
+ * Must return a note-off callback (e.g. for turning off your synth).
+ */
 export type NoteOnCallback = (index: number, rawAttack: number) => NoteOff;
 
+/**
+ * Wrapper for webmidi.js input.
+ * Listens on multiple channels.
+ */
 export class MidiIn {
   callback: NoteOnCallback;
   channels: Set<number>;
-  noteOffMap: Map<number, (rawRelease: number) => void>;
+  private noteOffMap: Map<number, (rawRelease: number) => void>;
+  private _noteOn: (event: NoteMessageEvent) => void;
+  private _noteOff: (event: NoteMessageEvent) => void;
   log: (msg: string) => void;
 
+  /**
+   * Construct a new wrapper for a webmidi.js input device.
+   * @param callback Function to call when a note-on event is received on any of the available channels.
+   * @param channels Channels to listen on.
+   * @param log Logging function.
+   */
   constructor(
     callback: NoteOnCallback,
     channels: Set<number>,
@@ -129,6 +190,10 @@ export class MidiIn {
     this.callback = callback;
     this.channels = channels;
     this.noteOffMap = new Map();
+
+    this._noteOn = this.noteOn.bind(this);
+    this._noteOff = this.noteOff.bind(this);
+
     if (log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.log = msg => {};
@@ -137,7 +202,25 @@ export class MidiIn {
     }
   }
 
-  noteOn(event: NoteMessageEvent) {
+  /**
+   * Make this wrapper (and your callback) respond to note-on/off events from this MIDI input.
+   * @param input MIDI input to listen to.
+   */
+  listen(input: Input) {
+    input.addListener('noteon', this._noteOn);
+    input.addListener('noteoff', this._noteOff);
+  }
+
+  /**
+   * Make this wrapper (and your callback) stop responding to note-on/off events from this MIDI input.
+   * @param input MIDI input that was listened to.
+   */
+  unlisten(input: Input) {
+    input.removeListener('noteon', this._noteOn);
+    input.removeListener('noteoff', this._noteOff);
+  }
+
+  private noteOn(event: NoteMessageEvent) {
     if (!this.channels.has(event.message.channel)) {
       return;
     }
@@ -149,7 +232,7 @@ export class MidiIn {
     this.noteOffMap.set(noteNumber, noteOff);
   }
 
-  noteOff(event: NoteMessageEvent) {
+  private noteOff(event: NoteMessageEvent) {
     if (!this.channels.has(event.message.channel)) {
       return;
     }
@@ -164,6 +247,9 @@ export class MidiIn {
     }
   }
 
+  /**
+   * Fire global note-off.
+   */
   deactivate() {
     for (const [noteNumber, noteOff] of this.noteOffMap) {
       this.noteOffMap.delete(noteNumber);
@@ -172,15 +258,32 @@ export class MidiIn {
   }
 }
 
-export type MidiNoteInfo = {
-  whiteNumber?: number;
-  sharpOf?: number;
-  flatOf?: number;
-};
+/**
+ * Information about a MIDI key.
+ */
+export type MidiKeyInfo =
+  | {
+      /** Contiguous index of the key with other white keys. */
+      whiteNumber: number;
+      sharpOf?: undefined;
+      flatOf?: undefined;
+    }
+  | {
+      whiteNumber?: undefined;
+      /** This black key is a sharp of that white key. */
+      sharpOf: number;
+      /** This black key is a flat of that white key. */
+      flatOf: number;
+    };
 
 const WHITES = [0, 2, 4, 5, 7, 9, 11];
 
-export function midiNoteInfo(chromaticNumber: number) {
+/**
+ * Get information about a MIDI key.
+ * @param chromaticNumber Contiguous chromatic index of the MIDI key
+ * @returns Information about the MIDI key.
+ */
+export function midiKeyInfo(chromaticNumber: number): MidiKeyInfo {
   const octave = Math.floor(chromaticNumber / 12);
   const index = chromaticNumber - 12 * octave;
   if (WHITES.includes(index)) {
