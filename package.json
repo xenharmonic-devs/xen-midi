@@ -1,0 +1,45 @@
+{
+  "name": "xen-midi",
+  "author": "Lumi Pakkanen",
+  "version": "0.0.1",
+  "description": "Free-pitch polyphonic MIDI I/O based on webmidi.js using multi-channel pitch-bend",
+  "license": "MIT",
+  "main": "dist/src/index",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xenharmonic-devs/xen-midi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xenharmonic-devs/xen-midi/issues"
+  },
+  "homepage": "https://github.com/xenharmonic-devs/xen-midi#readme",
+  "keywords": [
+    "Microtonal",
+    "Music",
+    "Xenharmonic",
+    "MIDI",
+    "Polyphonic"
+  ],
+  "files": [
+    "dist"
+  ],
+  "types": "dist/src/index.d.ts",
+  "devDependencies": {
+    "@types/node": "^14.11.2",
+    "gts": "^3.1.1",
+    "typescript": "~4.7.0"
+  },
+  "scripts": {
+    "lint": "gts lint",
+    "clean": "gts clean",
+    "compile": "tsc",
+    "fix": "gts fix",
+    "prepare": "npm run compile",
+    "pretest": "npm run compile",
+    "posttest": "npm run lint"
+  },
+  "dependencies": {
+    "webmidi": "^3.0.21",
+    "xen-dev-utils": "github:xenharmonic-devs/xen-dev-utils#v0.1.0"
+  }
+}
