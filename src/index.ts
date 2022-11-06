@@ -1,4 +1,4 @@
-import type {NoteMessageEvent, Output, Input} from 'webmidi';
+import {NoteMessageEvent, Output, Input, WebMidi} from 'webmidi';
 import {ftom} from 'xen-dev-utils';
 
 /**
@@ -22,8 +22,26 @@ type Voice = {
   centsOffset: number;
 };
 
+/**
+ * Free-pitch MIDI note to be played at a later time.
+ */
+export type Note = {
+  /** Frequency in Hertz (Hz) */
+  frequency: number;
+  /** Attack velocity from 0 to 127. */
+  rawAttack?: number;
+  /** Release velocity from 0 to 127. */
+  rawRelease?: number;
+  /** Note-on time in milliseconds (ms) as measured by `WebMidi.time`.
+   * If time is a string prefixed with "+" and followed by a number, the message will be delayed by that many milliseconds.
+   */
+  time: DOMHighResTimeStamp | string;
+  /** Note duration in milliseconds (ms). */
+  duration: DOMHighResTimeStamp;
+};
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function emptyNoteOff(rawRelease: number) {}
+function emptyNoteOff(rawRelease?: number, time?: DOMHighResTimeStamp) {}
 
 /**
  * Returned by MIDI note on. Turns the note off when called.
@@ -39,6 +57,7 @@ export class MidiOut {
   channels: Set<number>;
   log: (msg: string) => void;
   private voices: Voice[];
+  private lastEventTime: DOMHighResTimeStamp;
 
   /**
    * Constuct a new wrapper for a webmidi.js output.
@@ -68,6 +87,7 @@ export class MidiOut {
         channel,
       });
     });
+    this.lastEventTime = WebMidi.time;
 
     this.sendPitchBendRange();
   }
@@ -116,10 +136,24 @@ export class MidiOut {
   /**
    * Send a note-on event and pitch-bend to the output device in one of the available channels.
    * @param frequency Frequency of the note in Hertz (Hz).
-   * @param rawAttack Attack velocity of the note in from 0 to 127.
+   * @param rawAttack Attack velocity of the note from 0 to 127.
    * @returns A callback for sending a corresponding note off in the correct channel.
    */
-  sendNoteOn(frequency: number, rawAttack: number): NoteOff {
+  sendNoteOn(
+    frequency: number,
+    rawAttack?: number,
+    time?: DOMHighResTimeStamp
+  ): NoteOff {
+    if (time === undefined) {
+      time = WebMidi.time;
+    }
+    if (time < this.lastEventTime) {
+      throw new Error(
+        `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note on)`
+      );
+    }
+    this.lastEventTime = time;
+
     if (this.output === null) {
       return emptyNoteOff;
     }
@@ -133,27 +167,106 @@ export class MidiOut {
     const voice = this.selectVoice(centsOffset);
     this.log(
       `Sending note on ${noteNumber} at velocity ${
-        rawAttack / 127
+        (rawAttack || 64) / 127
       } on channel ${
         voice.channel
       } with bend ${centsOffset} resulting from frequency ${frequency}`
     );
     const bendRange = BEND_RANGE_IN_SEMITONES * 100;
     this.output.channels[voice.channel].sendPitchBend(centsOffset / bendRange);
-    this.output.channels[voice.channel].sendNoteOn(noteNumber, {rawAttack});
+    this.output.channels[voice.channel].sendNoteOn(noteNumber, {
+      rawAttack,
+      time,
+    });
 
-    const noteOff = (rawRelease: number) => {
+    const noteOff = (rawRelease?: number, time?: DOMHighResTimeStamp) => {
+      if (time === undefined) {
+        time = WebMidi.time;
+      }
+      if (time < this.lastEventTime) {
+        throw new Error(
+          `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note off)`
+        );
+      }
+      this.lastEventTime = time;
+
       this.log(
         `Sending note off ${noteNumber} at velocity ${
-          rawRelease / 127
+          (rawRelease || 64) / 127
         } on channel ${voice.channel}`
       );
       voice.age = EXPIRED;
       this.output!.channels[voice.channel].sendNoteOff(noteNumber, {
         rawRelease,
+        time,
       });
     };
     return noteOff;
+  }
+
+  /**
+   * Schedule a series of notes to be played at a later time.
+   * Please note that this reserves the channels until all notes have finished playing.
+   * @param notes Notes to be played.
+   */
+  playNotes(notes: Note[]) {
+    // Break notes into events.
+    const now = WebMidi.time;
+    const events = [];
+    for (const note of notes) {
+      let time: number;
+      if (typeof note.time === 'string') {
+        if (note.time.startsWith('+')) {
+          time = now + parseFloat(note.time.slice(1));
+        } else {
+          time = parseFloat(note.time);
+        }
+      } else {
+        time = note.time;
+      }
+      const off = {
+        type: 'off' as const,
+        rawRelease: note.rawRelease,
+        time: time + note.duration,
+        callback: emptyNoteOff,
+      };
+      events.push({
+        type: 'on' as const,
+        frequency: note.frequency,
+        rawAttack: note.rawAttack,
+        time,
+        off,
+      });
+      events.push(off);
+    }
+
+    // Sort events in causal order.
+    events.sort((a, b) => a.time - b.time);
+
+    // Trigger events in causal order.
+    for (const event of events) {
+      if (event.type === 'on') {
+        event.off.callback = this.sendNoteOn(
+          event.frequency,
+          event.rawAttack,
+          event.time
+        );
+      } else if (event.type === 'off') {
+        event.callback(event.rawRelease, event.time);
+      }
+    }
+  }
+
+  /**
+   * Clear scheduled notes that have not yet been played.
+   * Will start working once the Chrome bug is fixed: https://bugs.chromium.org/p/chromium/issues/detail?id=471798
+   */
+  clear() {
+    if (this.output !== null) {
+      this.output.clear();
+      this.output.sendAllNotesOff();
+    }
+    this.lastEventTime = WebMidi.time;
   }
 }
 

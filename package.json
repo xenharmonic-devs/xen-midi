@@ -42,6 +42,6 @@
   },
   "dependencies": {
     "webmidi": "^3.0.21",
-    "xen-dev-utils": "github:xenharmonic-devs/xen-dev-utils#v0.1.0"
+    "xen-dev-utils": "^0.1.2"
   }
 }
