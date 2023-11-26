@@ -20,6 +20,10 @@
     "MIDI",
     "Polyphonic"
   ],
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/frostburn"
+  },
   "files": [
     "dist"
   ],
@@ -41,7 +45,7 @@
     "doc": "typedoc --entryPointStrategy packages . --name xen-midi"
   },
   "dependencies": {
-    "webmidi": "^3.0.21",
-    "xen-dev-utils": "^0.1.2"
+    "webmidi": "^3.1.7",
+    "xen-dev-utils": "^0.1.4"
   }
 }
