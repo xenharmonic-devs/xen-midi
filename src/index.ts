@@ -16,7 +16,7 @@ const EPSILON = 1e-6;
  * Abstraction for a pitch-bent midi channel.
  * Polyphonic in pure octaves and 12edo in general.
  */
-type Voice = {
+export type Voice = {
   age: number;
   channel: number;
   centsOffset: number;
