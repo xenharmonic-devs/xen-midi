@@ -46,6 +46,6 @@
   },
   "dependencies": {
     "webmidi": "^3.1.7",
-    "xen-dev-utils": "^0.2.0"
+    "xen-dev-utils": "^0.2.6"
   }
 }
