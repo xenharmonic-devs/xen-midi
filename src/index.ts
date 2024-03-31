@@ -271,6 +271,13 @@ export class MidiOut {
 }
 
 /**
+ * Unique identifier for a note message in a specific channel.
+ */
+function noteIdentifier(event: NoteMessageEvent) {
+  return event.note.number + 128 * event.message.channel;
+}
+
+/**
  * Function to call when a MIDI note-on event is received (e.g. for turning on your synth).
  * Attack velocity is from 0 to 127.
  * Must return a note-off callback (e.g. for turning off your synth).
@@ -284,6 +291,7 @@ export type NoteOnCallback = (index: number, rawAttack: number) => NoteOff;
 export class MidiIn {
   callback: NoteOnCallback;
   channels: Set<number>;
+  /** Note-off map from (noteNumber + midiChannel * 128) to callbacks.  */
   private noteOffMap: Map<number, (rawRelease: number) => void>;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
@@ -340,9 +348,11 @@ export class MidiIn {
     const noteNumber = event.note.number;
     const attack = event.note.attack;
     const rawAttack = event.note.rawAttack;
-    this.log(`Midi note on ${noteNumber} at velocity ${attack}`);
+    this.log(
+      `Midi note on ${noteNumber} at velocity ${attack} on channel ${event.message.channel}`
+    );
     const noteOff = this.callback(noteNumber, rawAttack);
-    this.noteOffMap.set(noteNumber, noteOff);
+    this.noteOffMap.set(noteIdentifier(event), noteOff);
   }
 
   private noteOff(event: NoteMessageEvent) {
@@ -352,10 +362,13 @@ export class MidiIn {
     const noteNumber = event.note.number;
     const release = event.note.release;
     const rawRelease = event.note.rawRelease;
-    this.log(`Midi note off ${noteNumber} at velocity ${release}`);
-    const noteOff = this.noteOffMap.get(noteNumber);
+    this.log(
+      `Midi note off ${noteNumber} at velocity ${release} on channel ${event.message.channel}`
+    );
+    const id = noteIdentifier(event);
+    const noteOff = this.noteOffMap.get(id);
     if (noteOff !== undefined) {
-      this.noteOffMap.delete(noteNumber);
+      this.noteOffMap.delete(id);
       noteOff(rawRelease);
     }
   }
@@ -364,8 +377,8 @@ export class MidiIn {
    * Fire global note-off.
    */
   deactivate() {
-    for (const [noteNumber, noteOff] of this.noteOffMap) {
-      this.noteOffMap.delete(noteNumber);
+    for (const [id, noteOff] of this.noteOffMap) {
+      this.noteOffMap.delete(id);
       noteOff(80);
     }
   }
