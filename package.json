@@ -32,7 +32,8 @@
     "@types/node": "^20.10.4",
     "gts": "^5.2.0",
     "typedoc": "^0.25.4",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.4.0"
   },
   "scripts": {
     "lint": "gts lint",
@@ -42,6 +43,7 @@
     "prepare": "npm run compile",
     "pretest": "npm run compile",
     "posttest": "npm run lint",
+    "test": "vitest",
     "doc": "typedoc src/index.ts . --name xen-midi"
   },
   "dependencies": {
