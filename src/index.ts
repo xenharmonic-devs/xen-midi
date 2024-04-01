@@ -104,7 +104,7 @@ export class MidiOut {
   }
 
   /**
-   * Select a voice that's using a cents offset combatible channel or the oldest voice if nothing can be re-used.
+   * Select a voice that's using a cents offset compatible channel or the oldest voice if nothing can be re-used.
    * @param centsOffset Cents offset (pitch-bend) from 12edo.
    * @returns A voice for the next note-on event.
    */
@@ -291,7 +291,7 @@ export type NoteOnCallback = (index: number, rawAttack: number) => NoteOff;
 export class MidiIn {
   callback: NoteOnCallback;
   channels: Set<number>;
-  /** Note-off map from (noteNumber + midiChannel * 128) to callbacks.  */
+  /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
   private noteOffMap: Map<number, (rawRelease: number) => void>;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
@@ -317,7 +317,7 @@ export class MidiIn {
 
     if (log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      this.log = msg => {};
+      this.log = msg => { };
     } else {
       this.log = log;
     }
@@ -383,114 +383,6 @@ export class MidiIn {
     }
   }
 }
-
-/**
- * Function to call when a MIDI note-on event is received from a multichannel controller (e.g. Lumatone).
- * Attack velocity is from 0 to 127. Channel is from 0 to 15.
- * Must return a note-off callback (e.g. for turning off your synth).
- */
-export type MultiChannelNoteOnCallback = (index: number, rawAttack: number, channel: number) => NoteOff;
-
-/**
- * Wrapper for webmidi.js input.
- * Listens on multiple channels, maps incoming channels to equaves around a central channel
- */
-export class MultiChannelMidiIn extends MidiIn {
-  callback: MultiChannelNoteOnCallback;
-  channels: Set<number>;
-  /** Note-off map from (noteNumber + midiChannel * 128) to callbacks.  */
-  private noteOffMap: Map<number, (rawRelease: number) => void>;
-  private _noteOn: (event: NoteMessageEvent) => void;
-  private _noteOff: (event: NoteMessageEvent) => void;
-  log: (msg: string) => void;
-
-  /**
-   * Construct a new wrapper for a webmidi.js input device.
-   * @param callback Function to call when a note-on event is received on any of the available channels.
-   * @param channels Channels to listen on.
-   * @param log Logging function.
-   */
-  constructor(
-    callback: MultiChannelNoteOnCallback,
-    channels: Set<number>,
-    log?: (msg: string) => void
-  ) {
-    this.callback = callback;
-    this.channels = channels;
-    this.noteOffMap = new Map();
-
-    this._noteOn = this.noteOn.bind(this);
-    this._noteOff = this.noteOff.bind(this);
-
-    if (log === undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      this.log = msg => {};
-    } else {
-      this.log = log;
-    }
-  }
-
-  /**
-   * Make this wrapper (and your callback) respond to note-on/off events from this MIDI input.
-   * @param input MIDI input to listen to.
-   */
-  listen(input: Input) {
-    input.addListener('noteon', this._noteOn);
-    input.addListener('noteoff', this._noteOff);
-  }
-
-  /**
-   * Make this wrapper (and your callback) stop responding to note-on/off events from this MIDI input.
-   * @param input MIDI input that was listened to.
-   */
-  unlisten(input: Input) {
-    input.removeListener('noteon', this._noteOn);
-    input.removeListener('noteoff', this._noteOff);
-  }
-
-  private noteOn(event: NoteMessageEvent) {
-    if (!this.channels.has(event.message.channel)) {
-      return;
-    }
-    const noteNumber = event.note.number;
-    const attack = event.note.attack;
-    const rawAttack = event.note.rawAttack;
-    this.log(
-      `Midi note on ${noteNumber} at velocity ${attack} on channel ${event.message.channel}`
-    );
-    const noteOff = this.callback(noteNumber, rawAttack);
-    this.noteOffMap.set(noteIdentifier(event), noteOff);
-  }
-
-  private noteOff(event: NoteMessageEvent) {
-    if (!this.channels.has(event.message.channel)) {
-      return;
-    }
-    const noteNumber = event.note.number;
-    const release = event.note.release;
-    const rawRelease = event.note.rawRelease;
-    this.log(
-      `Midi note off ${noteNumber} at velocity ${release} on channel ${event.message.channel}`
-    );
-    const id = noteIdentifier(event);
-    const noteOff = this.noteOffMap.get(id);
-    if (noteOff !== undefined) {
-      this.noteOffMap.delete(id);
-      noteOff(rawRelease);
-    }
-  }
-
-  /**
-   * Fire global note-off.
-   */
-  deactivate() {
-    for (const [id, noteOff] of this.noteOffMap) {
-      this.noteOffMap.delete(id);
-      noteOff(80);
-    }
-  }
-}
-
 
 /**
  * Information about a MIDI key.
