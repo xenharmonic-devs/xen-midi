@@ -134,10 +134,10 @@ export class MidiOut {
   }
 
   /**
-   * Send a note-on event and pitch-bend to the output device in one of the available channels.
+   * Send a note-on event and pitch-bend to the output device on one of the available channels.
    * @param frequency Frequency of the note in Hertz (Hz).
    * @param rawAttack Attack velocity of the note from 0 to 127.
-   * @returns A callback for sending a corresponding note off in the correct channel.
+   * @returns A callback for sending a corresponding note off on the correct channel.
    */
   sendNoteOn(
     frequency: number,
@@ -317,7 +317,7 @@ export class MidiIn {
 
     if (log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      this.log = msg => { };
+      this.log = msg => {};
     } else {
       this.log = log;
     }
