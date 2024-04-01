@@ -104,7 +104,7 @@ export class MidiOut {
   }
 
   /**
-   * Select a voice that's using a cents offset combatible channel or the oldest voice if nothing can be re-used.
+   * Select a voice that's using a cents offset compatible channel or the oldest voice if nothing can be re-used.
    * @param centsOffset Cents offset (pitch-bend) from 12edo.
    * @returns A voice for the next note-on event.
    */
@@ -134,10 +134,10 @@ export class MidiOut {
   }
 
   /**
-   * Send a note-on event and pitch-bend to the output device in one of the available channels.
+   * Send a note-on event and pitch-bend to the output device on one of the available channels.
    * @param frequency Frequency of the note in Hertz (Hz).
    * @param rawAttack Attack velocity of the note from 0 to 127.
-   * @returns A callback for sending a corresponding note off in the correct channel.
+   * @returns A callback for sending a corresponding note off on the correct channel.
    */
   sendNoteOn(
     frequency: number,
@@ -274,7 +274,7 @@ export class MidiOut {
  * Unique identifier for a note message in a specific channel.
  */
 function noteIdentifier(event: NoteMessageEvent) {
-  return event.note.number + 128 * event.message.channel;
+  return event.note.number + 128 * (event.message.channel - 1); // webmidi sends channels 1-16, but identifier only needs to range between 0 and (16 * 128) - 1 = 2047
 }
 
 /**
@@ -291,7 +291,7 @@ export type NoteOnCallback = (index: number, rawAttack: number) => NoteOff;
 export class MidiIn {
   callback: NoteOnCallback;
   channels: Set<number>;
-  /** Note-off map from (noteNumber + midiChannel * 128) to callbacks.  */
+  /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
   private noteOffMap: Map<number, (rawRelease: number) => void>;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
