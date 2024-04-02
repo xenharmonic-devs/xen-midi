@@ -282,7 +282,11 @@ function noteIdentifier(event: NoteMessageEvent) {
  * Attack velocity is from 0 to 127.
  * Must return a note-off callback (e.g. for turning off your synth).
  */
-export type NoteOnCallback = (index: number, rawAttack: number) => NoteOff;
+export type NoteOnCallback = (
+  index: number,
+  rawAttack: number,
+  channel: number
+) => NoteOff;
 
 /**
  * Wrapper for webmidi.js input.
@@ -342,28 +346,30 @@ export class MidiIn {
   }
 
   private noteOn(event: NoteMessageEvent) {
-    if (!this.channels.has(event.message.channel)) {
+    const channel = event.message.channel;
+    if (!this.channels.has(channel)) {
       return;
     }
     const noteNumber = event.note.number;
     const attack = event.note.attack;
     const rawAttack = event.note.rawAttack;
     this.log(
-      `Midi note on ${noteNumber} at velocity ${attack} on channel ${event.message.channel}`
+      `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`
     );
-    const noteOff = this.callback(noteNumber, rawAttack);
+    const noteOff = this.callback(noteNumber, rawAttack, channel);
     this.noteOffMap.set(noteIdentifier(event), noteOff);
   }
 
   private noteOff(event: NoteMessageEvent) {
-    if (!this.channels.has(event.message.channel)) {
+    const channel = event.message.channel;
+    if (!this.channels.has(channel)) {
       return;
     }
     const noteNumber = event.note.number;
     const release = event.note.release;
     const rawRelease = event.note.rawRelease;
     this.log(
-      `Midi note off ${noteNumber} at velocity ${release} on channel ${event.message.channel}`
+      `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`
     );
     const id = noteIdentifier(event);
     const noteOff = this.noteOffMap.get(id);
