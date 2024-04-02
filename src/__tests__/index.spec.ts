@@ -55,11 +55,24 @@ class MockSynth {
   constructor() {
     this.offs = [];
   }
+  // Only two parameters here to make sure that TypeScript still accepts the callback.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   noteOn(index: number, rawAttack: number) {
     const off = vi.fn();
     this.offs.push(off);
     return off;
+  }
+}
+
+class MockOctaveSynth {
+  frequenciesPlayed: number[];
+  constructor() {
+    this.frequenciesPlayed = [];
+  }
+  noteOn(index: number, rawAttack: number, channel: number) {
+    const frequency = 440 * 2 ** ((index - 69) / 31 + channel - 3);
+    this.frequenciesPlayed.push(frequency);
+    return () => undefined;
   }
 }
 
@@ -75,7 +88,7 @@ describe('MIDI input wrapper', () => {
 
     // Synthesize note on message on channel 1
     mockInput.onmidimessage({data: [144, 69, 127]});
-    expect(spy).toHaveBeenCalledWith(69, 127);
+    expect(spy).toHaveBeenCalledWith(69, 127, 1);
     expect(synth.offs).toHaveLength(1);
     expect(synth.offs[0]).not.toBeCalled();
 
@@ -92,5 +105,24 @@ describe('MIDI input wrapper', () => {
     // Note off message on channel 1
     mockInput.onmidimessage({data: [128, 69, 127]});
     expect(synth.offs[0]).toBeCalledWith(127);
+  });
+
+  it('provides the channel number for e.g. octave shifting', () => {
+    const synth = new MockOctaveSynth();
+    const midiIn = new MidiIn(
+      synth.noteOn.bind(synth),
+      new Set([1, 2, 3, 4, 5, 6])
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    // Note on message on channel 3
+    mockInput.onmidimessage({data: [146, 69, 127]});
+    // Note on message on channel 2
+    mockInput.onmidimessage({data: [145, 69, 127]});
+
+    expect(synth.frequenciesPlayed).toEqual([440, 220]);
   });
 });
