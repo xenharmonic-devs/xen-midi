@@ -1,7 +1,7 @@
 {
   "name": "xen-midi",
   "author": "Lumi Pakkanen",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Free-pitch polyphonic MIDI I/O based on webmidi.js using multi-channel pitch-bend",
   "license": "MIT",
   "main": "dist/src/index",
