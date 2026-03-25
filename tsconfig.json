@@ -1,7 +1,10 @@
 {
   "extends": "./node_modules/gts/tsconfig-google.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "composite": false,
+    "declaration": true,
+    "incremental": false,
+    "rootDir": "./src",
     "outDir": "dist",
     "strict": true,
     "moduleResolution": "node",
@@ -10,9 +13,15 @@
     "lib": [
       "es2016",
       "dom"
+    ],
+    "types": [
+      "node"
     ]
   },
   "include": [
-    "src/index.ts"
+    "src/**.*ts"
+  ],
+  "exclude": [
+    "src/**/__tests__/**"
   ]
 }

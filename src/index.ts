@@ -68,7 +68,7 @@ export class MidiOut {
   constructor(
     output: Output | null,
     channels: Set<number>,
-    log?: (msg: string) => void
+    log?: (msg: string) => void,
   ) {
     this.output = output;
     this.channels = channels;
@@ -97,7 +97,7 @@ export class MidiOut {
       this.channels.forEach(channel => {
         this.output!.channels[channel].sendPitchBendRange(
           BEND_RANGE_IN_SEMITONES,
-          0
+          0,
         );
       });
     }
@@ -142,14 +142,14 @@ export class MidiOut {
   sendNoteOn(
     frequency: number,
     rawAttack?: number,
-    time?: DOMHighResTimeStamp
+    time?: DOMHighResTimeStamp,
   ): NoteOff {
     if (time === undefined) {
       time = WebMidi.time;
     }
     if (time < this.lastEventTime) {
       throw new Error(
-        `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note on)`
+        `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note on)`,
       );
     }
     this.lastEventTime = time;
@@ -170,7 +170,7 @@ export class MidiOut {
         (rawAttack || 64) / 127
       } on channel ${
         voice.channel
-      } with bend ${centsOffset} resulting from frequency ${frequency}`
+      } with bend ${centsOffset} resulting from frequency ${frequency}`,
     );
     const bendRange = BEND_RANGE_IN_SEMITONES * 100;
     this.output.channels[voice.channel].sendPitchBend(centsOffset / bendRange);
@@ -185,7 +185,7 @@ export class MidiOut {
       }
       if (time < this.lastEventTime) {
         throw new Error(
-          `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note off)`
+          `Events must be triggered in causal order: ${time} < ${this.lastEventTime} (note off)`,
         );
       }
       this.lastEventTime = time;
@@ -193,7 +193,7 @@ export class MidiOut {
       this.log(
         `Sending note off ${noteNumber} at velocity ${
           (rawRelease || 64) / 127
-        } on channel ${voice.channel}`
+        } on channel ${voice.channel}`,
       );
       voice.age = EXPIRED;
       this.output!.channels[voice.channel].sendNoteOff(noteNumber, {
@@ -249,7 +249,7 @@ export class MidiOut {
         event.off.callback = this.sendNoteOn(
           event.frequency,
           event.rawAttack,
-          event.time
+          event.time,
         );
       } else if (event.type === 'off') {
         event.callback(event.rawRelease, event.time);
@@ -285,7 +285,7 @@ function noteIdentifier(event: NoteMessageEvent) {
 export type NoteOnCallback = (
   index: number,
   rawAttack: number,
-  channel: number
+  channel: number,
 ) => NoteOff;
 
 /**
@@ -310,7 +310,7 @@ export class MidiIn {
   constructor(
     callback: NoteOnCallback,
     channels: Set<number>,
-    log?: (msg: string) => void
+    log?: (msg: string) => void,
   ) {
     this.callback = callback;
     this.channels = channels;
@@ -354,7 +354,7 @@ export class MidiIn {
     const attack = event.note.attack;
     const rawAttack = event.note.rawAttack;
     this.log(
-      `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`
+      `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`,
     );
     const noteOff = this.callback(noteNumber, rawAttack, channel);
     this.noteOffMap.set(noteIdentifier(event), noteOff);
@@ -369,7 +369,7 @@ export class MidiIn {
     const release = event.note.release;
     const rawRelease = event.note.rawRelease;
     this.log(
-      `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`
+      `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`,
     );
     const id = noteIdentifier(event);
     const noteOff = this.noteOffMap.get(id);

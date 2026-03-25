@@ -24,19 +24,19 @@ describe('Microtonal MIDI output', () => {
     const off440 = out.sendNoteOn(440, MAX_VELOCITY);
     expect(sendSpy).toBeCalledTimes(14);
     expect(log).toHaveBeenCalledWith(
-      'Sending note on 69 at velocity 1 on channel 1 with bend 0 resulting from frequency 440'
+      'Sending note on 69 at velocity 1 on channel 1 with bend 0 resulting from frequency 440',
     );
 
     off440(MAX_VELOCITY);
     expect(sendSpy).toBeCalledTimes(15);
     expect(log).toHaveBeenCalledWith(
-      'Sending note off 69 at velocity 1 on channel 1'
+      'Sending note off 69 at velocity 1 on channel 1',
     );
 
     const off550 = out.sendNoteOn(550, MAX_VELOCITY);
     expect(sendSpy).toBeCalledTimes(17);
     expect(log).toHaveBeenCalledWith(
-      'Sending note on 73 at velocity 1 on channel 2 with bend -13.686286135165915 resulting from frequency 550'
+      'Sending note on 73 at velocity 1 on channel 2 with bend -13.686286135165915 resulting from frequency 550',
     );
 
     const off1100 = out.sendNoteOn(1100, MAX_VELOCITY);
@@ -111,7 +111,7 @@ describe('MIDI input wrapper', () => {
     const synth = new MockOctaveSynth();
     const midiIn = new MidiIn(
       synth.noteOn.bind(synth),
-      new Set([1, 2, 3, 4, 5, 6])
+      new Set([1, 2, 3, 4, 5, 6]),
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mockInput: any = {};
