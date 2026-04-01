@@ -4,7 +4,7 @@
   "version": "0.2.2",
   "description": "Free-pitch polyphonic MIDI I/O based on webmidi.js using multi-channel pitch-bend",
   "license": "MIT",
-  "main": "dist/index",
+  "main": "dist/index.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xenharmonic-devs/xen-midi.git"
@@ -27,7 +27,7 @@
   "files": [
     "dist"
   ],
-  "types": "dist/src/index.d.ts",
+  "types": "dist/index.d.ts",
   "devDependencies": {
     "@types/node": "^25.5.0",
     "gts": "^7.0.0",
@@ -49,5 +49,13 @@
   "dependencies": {
     "webmidi": "^3.1.14",
     "xen-dev-utils": "^0.12.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   }
 }
