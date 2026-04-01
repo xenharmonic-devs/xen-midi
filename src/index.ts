@@ -26,14 +26,18 @@ export type Voice = {
  * Free-pitch MIDI note to be played at a later time.
  */
 export type Note = {
-  /** Frequency in Hertz (Hz) */
+  /** Frequency in Hertz (Hz). */
   frequency: number;
   /** Attack velocity from 0 to 127. */
   rawAttack?: number;
   /** Release velocity from 0 to 127. */
   rawRelease?: number;
-  /** Note-on time in milliseconds (ms) as measured by `WebMidi.time`.
-   * If time is a string prefixed with "+" and followed by a number, the message will be delayed by that many milliseconds.
+  /**
+   * Note-on time in milliseconds (ms) as measured by `WebMidi.time`.
+   *
+   * - If this is a number, it is treated as an absolute WebMidi timestamp.
+   * - If this is a string prefixed with `"+"`, the note is delayed by that many milliseconds from the moment `playNotes` is called.
+   * - Otherwise, a string is parsed as a numeric absolute timestamp in milliseconds.
    */
   time: DOMHighResTimeStamp | string;
   /** Note duration in milliseconds (ms). */
@@ -60,7 +64,7 @@ export class MidiOut {
   private lastEventTime: DOMHighResTimeStamp;
 
   /**
-   * Constuct a new wrapper for a webmidi.js output.
+   * Construct a new wrapper for a webmidi.js output.
    * @param output Output device or `null` if you need a dummy out.
    * @param channels Channels to use for sending pitch bent MIDI notes. Number of channels determines maximum microtonal polyphony.
    * @param log Logging function.
@@ -109,7 +113,7 @@ export class MidiOut {
    * @returns A voice for the next note-on event.
    */
   private selectVoice(centsOffset: number) {
-    // Age signifies how many note ons have occured after voice intialization
+    // Age signifies how many note-ons have occurred after voice initialization.
     this.voices.forEach(voice => voice.age++);
 
     // Re-use a channel that already has the correct pitch bend
@@ -206,6 +210,7 @@ export class MidiOut {
 
   /**
    * Schedule a series of notes to be played at a later time.
+   * Notes are converted to note-on/off events, sorted by timestamp, and then emitted in causal order.
    * Please note that this reserves the channels until all notes have finished playing.
    * @param notes Notes to be played.
    */
