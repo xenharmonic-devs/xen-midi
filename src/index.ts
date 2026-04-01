@@ -171,7 +171,7 @@ export class MidiOut {
     const voice = this.selectVoice(centsOffset);
     this.log(
       `Sending note on ${noteNumber} at velocity ${
-        (rawAttack || 64) / 127
+        (rawAttack ?? 64) / 127
       } on channel ${
         voice.channel
       } with bend ${centsOffset} resulting from frequency ${frequency}`,
@@ -196,7 +196,7 @@ export class MidiOut {
 
       this.log(
         `Sending note off ${noteNumber} at velocity ${
-          (rawRelease || 64) / 127
+          (rawRelease ?? 64) / 127
         } on channel ${voice.channel}`,
       );
       voice.age = EXPIRED;
@@ -301,7 +301,7 @@ export class MidiIn {
   callback: NoteOnCallback;
   channels: Set<number>;
   /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
-  private noteOffMap: Map<number, (rawRelease: number) => void>;
+  private noteOffMap: Map<number, NoteOff>;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
   log: (msg: string) => void;
@@ -358,11 +358,23 @@ export class MidiIn {
     const noteNumber = event.note.number;
     const attack = event.note.attack;
     const rawAttack = event.note.rawAttack;
+    // Some MIDI devices encode note-off as note-on with velocity 0.
+    if (rawAttack === 0) {
+      this.noteOff(event);
+      return;
+    }
     this.log(
       `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`,
     );
+    const id = noteIdentifier(event);
+    const existingNoteOff = this.noteOffMap.get(id);
+    if (existingNoteOff !== undefined) {
+      this.noteOffMap.delete(id);
+      existingNoteOff();
+    }
+
     const noteOff = this.callback(noteNumber, rawAttack, channel);
-    this.noteOffMap.set(noteIdentifier(event), noteOff);
+    this.noteOffMap.set(id, noteOff);
   }
 
   private noteOff(event: NoteMessageEvent) {
