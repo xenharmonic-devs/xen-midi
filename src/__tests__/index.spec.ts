@@ -1,5 +1,5 @@
 import {describe, it, expect, vi, Mock} from 'vitest';
-import {MidiIn, MidiOut} from '..';
+import {MidiIn, MidiOut} from '../index.js';
 import {Input, Output} from 'webmidi';
 
 const MAX_VELOCITY = 127;

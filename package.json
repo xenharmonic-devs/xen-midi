@@ -4,6 +4,7 @@
   "version": "0.3.0",
   "description": "Free-pitch polyphonic MIDI I/O based on webmidi.js using multi-channel pitch-bend",
   "license": "MIT",
+  "type": "module",
   "main": "dist/index.js",
   "repository": {
     "type": "git",
@@ -29,11 +30,11 @@
   ],
   "types": "dist/index.d.ts",
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.5.2",
     "gts": "^7.0.0",
     "typedoc": "^0.28.18",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.1"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
   },
   "scripts": {
     "lint": "gts lint",
@@ -47,15 +48,13 @@
     "doc": "typedoc src/index.ts --name xen-midi"
   },
   "dependencies": {
-    "webmidi": "^3.1.14",
-    "xen-dev-utils": "^0.12.0"
+    "webmidi": "^3.1.16",
+    "xen-dev-utils": "^0.12.2"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js"
     }
   }
 }

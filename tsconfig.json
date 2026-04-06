@@ -7,9 +7,9 @@
     "rootDir": "./src",
     "outDir": "dist",
     "strict": true,
-    "moduleResolution": "node",
+    "moduleResolution": "nodenext",
     "resolveJsonModule": false,
-    "module": "CommonJS",
+    "module": "nodenext",
     "lib": [
       "es2016",
       "dom"

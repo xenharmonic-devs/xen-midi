@@ -1,5 +1,8 @@
 # Change log
 
+## 0.3.1
+ * Switch TypeScript to nodenext and enable ESM package mode
+
 ## 0.3.0
  * Feature: Improve `MidiIn` retrigger handling for active notes
  * Improvement: Add `exports` field to `package.json`
