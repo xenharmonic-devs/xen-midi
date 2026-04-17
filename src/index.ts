@@ -3,6 +3,7 @@ import {
   NoteMessageEvent,
   Output,
   Input,
+  Utilities,
   WebMidi,
 } from 'webmidi';
 import {ftom} from 'xen-dev-utils/conversion';
@@ -17,6 +18,13 @@ const EXPIRED = 10000;
 
 // Cents offset tolerance for channel reuse.
 const EPSILON = 1e-6;
+
+const DAMPERPEDAL = Utilities.getCcNumberByName('damperpedal');
+const SOSTENUTO = Utilities.getCcNumberByName('sostenuto');
+
+if (DAMPERPEDAL === undefined || SOSTENUTO === undefined) {
+  throw new Error('Failed to resolve pedal controller numbers from webmidi.');
+}
 
 /**
  * Abstraction for a pitch-bent midi channel.
@@ -454,7 +462,10 @@ export class MidiIn {
     if (!this.channels.has(channel)) {
       return;
     }
-    if (event.controller.number !== 64 && event.controller.number !== 66) {
+    if (
+      event.controller.number !== DAMPERPEDAL &&
+      event.controller.number !== SOSTENUTO
+    ) {
       return;
     }
     const rawValue =
@@ -465,11 +476,11 @@ export class MidiIn {
           : event.value === true
             ? 127
             : 0;
-    if (event.controller.number === 64 && rawValue >= 64) {
+    if (event.controller.number === DAMPERPEDAL && rawValue >= 64) {
       this.holdPedalChannels.add(channel);
       return;
     }
-    if (event.controller.number === 64 && rawValue < 64) {
+    if (event.controller.number === DAMPERPEDAL && rawValue < 64) {
       if (!this.holdPedalChannels.has(channel)) {
         return;
       }
@@ -477,7 +488,7 @@ export class MidiIn {
       this.releaseDeferredNoteOffs(channel);
       return;
     }
-    if (event.controller.number === 66 && rawValue >= 64) {
+    if (event.controller.number === SOSTENUTO && rawValue >= 64) {
       this.sostenutoChannels.add(channel);
       const captured = this.getSostenutoNotes(channel);
       captured.clear();
