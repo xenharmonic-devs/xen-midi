@@ -58,6 +58,13 @@ function emptyNoteOff(rawRelease?: number, time?: DOMHighResTimeStamp) {}
  */
 export type NoteOff = typeof emptyNoteOff;
 
+export type MidiOutOptions = {
+  /**
+   * Optional logger for outgoing MIDI note events.
+   */
+  log?: (msg: string) => void;
+};
+
 /**
  * Wrapper for a webmidi.js output.
  * Uses multiple channels to achieve polyphonic microtuning.
@@ -73,20 +80,20 @@ export class MidiOut {
    * Construct a new wrapper for a webmidi.js output.
    * @param output Output device or `null` if you need a dummy out.
    * @param channels Channels to use for sending pitch bent MIDI notes. Number of channels determines maximum microtonal polyphony.
-   * @param log Logging function.
+   * @param options Optional output behavior flags and logger.
    */
   constructor(
     output: Output | null,
     channels: Set<number>,
-    log?: (msg: string) => void,
+    options: MidiOutOptions = {},
   ) {
     this.output = output;
     this.channels = channels;
-    if (log === undefined) {
+    if (options.log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.log = msg => {};
     } else {
-      this.log = log;
+      this.log = options.log;
     }
 
     this.voices = [];

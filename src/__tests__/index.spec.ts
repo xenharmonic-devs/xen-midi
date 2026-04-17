@@ -17,7 +17,7 @@ describe('Microtonal MIDI output', () => {
     const output = new Output(mockOutput as any);
     const channels = new Set([1, 2]);
     const log = vi.fn();
-    const out = new MidiOut(output, channels, log);
+    const out = new MidiOut(output, channels, {log});
 
     expect(sendSpy).toBeCalledTimes(12);
 
@@ -54,7 +54,7 @@ describe('Microtonal MIDI output', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const output = new Output(mockOutput as any);
     const log = vi.fn();
-    const out = new MidiOut(output, new Set([1]), log);
+    const out = new MidiOut(output, new Set([1]), {log});
 
     const off = out.sendNoteOn(440, 0);
     expect(log).toHaveBeenCalledWith(
