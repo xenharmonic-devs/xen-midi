@@ -304,6 +304,13 @@ function noteIdentifier(event: NoteMessageEvent) {
 }
 
 /**
+ * MIDI channel number (1-16) from a note identifier.
+ */
+function channelFromIdentifier(identifier: number) {
+  return Math.floor(identifier / 128) + 1;
+}
+
+/**
  * Function to call when a MIDI note-on event is received (e.g. for turning on your synth).
  * Attack velocity is from 0 to 127.
  * Must return a note-off callback (e.g. for turning off your synth).
@@ -493,7 +500,7 @@ export class MidiIn {
       const captured = this.getSostenutoNotes(channel);
       captured.clear();
       for (const id of this.heldNoteIds) {
-        if (Math.floor(id / 128) + 1 === channel) {
+        if (channelFromIdentifier(id) === channel) {
           captured.add(id);
         }
       }
@@ -509,7 +516,7 @@ export class MidiIn {
 
   private releaseDeferredNoteOffs(channel: number) {
     for (const [id, rawRelease] of this.deferredNoteOffMap) {
-      if (Math.floor(id / 128) + 1 !== channel) {
+      if (channelFromIdentifier(id) !== channel) {
         continue;
       }
       if (this.shouldDeferNoteOff(channel, id)) {
@@ -553,10 +560,10 @@ export class MidiIn {
   deactivate() {
     for (const [id, noteOff] of this.noteOffMap) {
       this.deferredNoteOffMap.delete(id);
-      this.heldNoteIds.delete(id);
       this.noteOffMap.delete(id);
       noteOff(80);
     }
+    this.heldNoteIds.clear();
     this.holdPedalChannels.clear();
     this.sostenutoChannels.clear();
     this.sostenutoNoteIdsByChannel.clear();
