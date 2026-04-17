@@ -1,5 +1,5 @@
 import {NoteMessageEvent, Output, Input, WebMidi} from 'webmidi';
-import {ftom} from 'xen-dev-utils';
+import {ftom} from 'xen-dev-utils/conversion';
 
 /**
  * Pitch bend range measured in semitones (+-).
