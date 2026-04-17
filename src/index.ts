@@ -301,7 +301,7 @@ export type NoteOnCallback = (
 
 export type MidiInOptions = {
   /**
-   * If true, control change 64 (sustain pedal) delays note-off callbacks until pedal release.
+   * If true, hold pedal (CC64, sustain) and sostenuto (CC66) can delay note-off callbacks.
    */
   sustainPedal?: boolean;
   /**
@@ -319,17 +319,17 @@ export class MidiIn {
   channels: Set<number>;
   /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
   private noteOffMap: Map<number, NoteOff>;
-  /** Deferred note-offs while sustain pedal is held. */
+  /** Deferred note-offs while pedals are holding notes. */
   private deferredNoteOffMap: Map<number, number | undefined>;
-  /** Channels where sustain pedal (CC64) is currently active. */
-  private sustainedChannels: Set<number>;
+  /** Channels where hold pedal (CC64) is currently active. */
+  private holdPedalChannels: Set<number>;
   /** Channels where sostenuto pedal (CC66) is currently active. */
   private sostenutoChannels: Set<number>;
   /** Note identifiers physically held down by keyboard state. */
   private heldNoteIds: Set<number>;
   /** Sostenuto-captured note identifiers by MIDI channel. */
   private sostenutoNoteIdsByChannel: Map<number, Set<number>>;
-  private sustainPedal: boolean;
+  private sustainPedalEnabled: boolean;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
   private _controlChange: (event: ControlChangeMessageEvent) => void;
@@ -348,10 +348,10 @@ export class MidiIn {
   ) {
     this.callback = callback;
     this.channels = channels;
-    this.sustainPedal = options.sustainPedal === true;
+    this.sustainPedalEnabled = options.sustainPedal === true;
     this.noteOffMap = new Map();
     this.deferredNoteOffMap = new Map();
-    this.sustainedChannels = new Set();
+    this.holdPedalChannels = new Set();
     this.sostenutoChannels = new Set();
     this.heldNoteIds = new Set();
     this.sostenutoNoteIdsByChannel = new Map();
@@ -375,7 +375,7 @@ export class MidiIn {
   listen(input: Input) {
     input.addListener('noteon', this._noteOn);
     input.addListener('noteoff', this._noteOff);
-    if (this.sustainPedal) {
+    if (this.sustainPedalEnabled) {
       input.addListener('controlchange', this._controlChange);
     }
   }
@@ -387,7 +387,7 @@ export class MidiIn {
   unlisten(input: Input) {
     input.removeListener('noteon', this._noteOn);
     input.removeListener('noteoff', this._noteOff);
-    if (this.sustainPedal) {
+    if (this.sustainPedalEnabled) {
       input.removeListener('controlchange', this._controlChange);
     }
   }
@@ -435,7 +435,7 @@ export class MidiIn {
     );
     const id = noteIdentifier(event);
     this.heldNoteIds.delete(id);
-    if (this.sustainPedal && this.shouldDeferNoteOff(channel, id)) {
+    if (this.sustainPedalEnabled && this.shouldDeferNoteOff(channel, id)) {
       this.deferredNoteOffMap.set(id, rawRelease);
       return;
     }
@@ -459,14 +459,14 @@ export class MidiIn {
             ? 127
             : 0;
     if (event.controller.number === 64 && rawValue >= 64) {
-      this.sustainedChannels.add(channel);
+      this.holdPedalChannels.add(channel);
       return;
     }
     if (event.controller.number === 64 && rawValue < 64) {
-      if (!this.sustainedChannels.has(channel)) {
+      if (!this.holdPedalChannels.has(channel)) {
         return;
       }
-      this.sustainedChannels.delete(channel);
+      this.holdPedalChannels.delete(channel);
       this.releaseDeferredNoteOffs(channel);
       return;
     }
@@ -502,7 +502,7 @@ export class MidiIn {
   }
 
   private shouldDeferNoteOff(channel: number, id: number) {
-    if (this.sustainedChannels.has(channel)) {
+    if (this.holdPedalChannels.has(channel)) {
       return true;
     }
     return (
@@ -539,7 +539,7 @@ export class MidiIn {
       this.noteOffMap.delete(id);
       noteOff(80);
     }
-    this.sustainedChannels.clear();
+    this.holdPedalChannels.clear();
     this.sostenutoChannels.clear();
     this.sostenutoNoteIdsByChannel.clear();
   }
