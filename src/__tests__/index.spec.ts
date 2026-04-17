@@ -228,4 +228,27 @@ describe('MIDI input wrapper', () => {
     mockInput.onmidimessage({data: [176, 64, 0]}); // sustain up should not kill new note
     expect(synth.offs[1]).not.toBeCalled();
   });
+
+  it('applies sostenuto only to notes held when pedal is pressed', () => {
+    const synth = new MockSynth();
+    const midiIn = new MidiIn(synth.noteOn.bind(synth), new Set([1]), {
+      sustainPedal: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    mockInput.onmidimessage({data: [144, 69, 100]}); // held before sostenuto
+    mockInput.onmidimessage({data: [176, 66, 127]}); // sostenuto down
+    mockInput.onmidimessage({data: [128, 69, 55]}); // deferred by sostenuto
+    expect(synth.offs[0]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [144, 70, 100]}); // pressed after sostenuto
+    mockInput.onmidimessage({data: [128, 70, 60]}); // should release immediately
+    expect(synth.offs[1]).toBeCalledWith(60);
+
+    mockInput.onmidimessage({data: [176, 66, 0]}); // sostenuto up releases held note
+    expect(synth.offs[0]).toBeCalledWith(55);
+  });
 });
