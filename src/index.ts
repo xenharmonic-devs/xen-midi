@@ -1,4 +1,10 @@
-import {NoteMessageEvent, Output, Input, WebMidi} from 'webmidi';
+import {
+  ControlChangeMessageEvent,
+  NoteMessageEvent,
+  Output,
+  Input,
+  WebMidi,
+} from 'webmidi';
 import {ftom} from 'xen-dev-utils/conversion';
 
 /**
@@ -293,6 +299,17 @@ export type NoteOnCallback = (
   channel: number,
 ) => NoteOff;
 
+export type MidiInOptions = {
+  /**
+   * If true, control change 64 (sustain pedal) delays note-off callbacks until pedal release.
+   */
+  sustainPedal?: boolean;
+  /**
+   * Optional logger for incoming MIDI note events.
+   */
+  log?: (msg: string) => void;
+};
+
 /**
  * Wrapper for webmidi.js input.
  * Listens on multiple channels.
@@ -302,33 +319,43 @@ export class MidiIn {
   channels: Set<number>;
   /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
   private noteOffMap: Map<number, NoteOff>;
+  /** Deferred note-offs while sustain pedal is held. */
+  private deferredNoteOffMap: Map<number, number | undefined>;
+  /** Channels where sustain pedal is currently active. */
+  private sustainedChannels: Set<number>;
+  private sustainPedal: boolean;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
+  private _controlChange: (event: ControlChangeMessageEvent) => void;
   log: (msg: string) => void;
 
   /**
    * Construct a new wrapper for a webmidi.js input device.
    * @param callback Function to call when a note-on event is received on any of the available channels.
    * @param channels Channels to listen on.
-   * @param log Logging function.
+   * @param options Optional MIDI input behavior flags and logger.
    */
   constructor(
     callback: NoteOnCallback,
     channels: Set<number>,
-    log?: (msg: string) => void,
+    options: MidiInOptions = {},
   ) {
     this.callback = callback;
     this.channels = channels;
+    this.sustainPedal = options.sustainPedal === true;
     this.noteOffMap = new Map();
+    this.deferredNoteOffMap = new Map();
+    this.sustainedChannels = new Set();
 
     this._noteOn = this.noteOn.bind(this);
     this._noteOff = this.noteOff.bind(this);
+    this._controlChange = this.controlChange.bind(this);
 
-    if (log === undefined) {
+    if (options.log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.log = msg => {};
     } else {
-      this.log = log;
+      this.log = options.log;
     }
   }
 
@@ -339,6 +366,9 @@ export class MidiIn {
   listen(input: Input) {
     input.addListener('noteon', this._noteOn);
     input.addListener('noteoff', this._noteOff);
+    if (this.sustainPedal) {
+      input.addListener('controlchange', this._controlChange);
+    }
   }
 
   /**
@@ -348,6 +378,9 @@ export class MidiIn {
   unlisten(input: Input) {
     input.removeListener('noteon', this._noteOn);
     input.removeListener('noteoff', this._noteOff);
+    if (this.sustainPedal) {
+      input.removeListener('controlchange', this._controlChange);
+    }
   }
 
   private noteOn(event: NoteMessageEvent) {
@@ -369,6 +402,7 @@ export class MidiIn {
     const id = noteIdentifier(event);
     const existingNoteOff = this.noteOffMap.get(id);
     if (existingNoteOff !== undefined) {
+      this.deferredNoteOffMap.delete(id);
       this.noteOffMap.delete(id);
       existingNoteOff();
     }
@@ -389,8 +423,53 @@ export class MidiIn {
       `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`,
     );
     const id = noteIdentifier(event);
+    if (this.sustainPedal && this.sustainedChannels.has(channel)) {
+      this.deferredNoteOffMap.set(id, rawRelease);
+      return;
+    }
+    this.triggerNoteOff(id, rawRelease);
+  }
+
+  private controlChange(event: ControlChangeMessageEvent) {
+    const channel = event.message.channel;
+    if (!this.channels.has(channel)) {
+      return;
+    }
+    if (event.controller.number !== 64) {
+      return;
+    }
+    const rawValue =
+      typeof event.rawValue === 'number'
+        ? event.rawValue
+        : typeof event.value === 'number'
+          ? event.value
+          : event.value === true
+            ? 127
+            : 0;
+    if (rawValue >= 64) {
+      this.sustainedChannels.add(channel);
+      return;
+    }
+    if (!this.sustainedChannels.has(channel)) {
+      return;
+    }
+    this.sustainedChannels.delete(channel);
+    this.releaseDeferredNoteOffs(channel);
+  }
+
+  private releaseDeferredNoteOffs(channel: number) {
+    for (const [id, rawRelease] of this.deferredNoteOffMap) {
+      if (Math.floor(id / 128) + 1 !== channel) {
+        continue;
+      }
+      this.triggerNoteOff(id, rawRelease);
+    }
+  }
+
+  private triggerNoteOff(id: number, rawRelease?: number) {
     const noteOff = this.noteOffMap.get(id);
     if (noteOff !== undefined) {
+      this.deferredNoteOffMap.delete(id);
       this.noteOffMap.delete(id);
       noteOff(rawRelease);
     }
@@ -401,9 +480,11 @@ export class MidiIn {
    */
   deactivate() {
     for (const [id, noteOff] of this.noteOffMap) {
+      this.deferredNoteOffMap.delete(id);
       this.noteOffMap.delete(id);
       noteOff(80);
     }
+    this.sustainedChannels.clear();
   }
 }
 

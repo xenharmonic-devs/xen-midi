@@ -183,4 +183,49 @@ describe('MIDI input wrapper', () => {
 
     expect(synth.frequenciesPlayed).toEqual([440, 220]);
   });
+
+  it('delays note-off callbacks while sustain pedal is pressed when enabled', () => {
+    const synth = new MockSynth();
+    const midiIn = new MidiIn(synth.noteOn.bind(synth), new Set([1]), {
+      sustainPedal: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    mockInput.onmidimessage({data: [144, 69, 100]}); // note-on channel 1
+    expect(synth.offs).toHaveLength(1);
+
+    mockInput.onmidimessage({data: [176, 64, 127]}); // sustain down
+    mockInput.onmidimessage({data: [128, 69, 45]}); // note-off channel 1
+    expect(synth.offs[0]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [176, 64, 0]}); // sustain up
+    expect(synth.offs[0]).toBeCalledWith(45);
+  });
+
+  it('releases old sustained voice before re-triggering the same key', () => {
+    const synth = new MockSynth();
+    const midiIn = new MidiIn(synth.noteOn.bind(synth), new Set([1]), {
+      sustainPedal: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    mockInput.onmidimessage({data: [144, 69, 100]}); // first note-on
+    mockInput.onmidimessage({data: [176, 64, 127]}); // sustain down
+    mockInput.onmidimessage({data: [128, 69, 45]}); // deferred note-off
+    expect(synth.offs[0]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [144, 69, 80]}); // re-trigger same key
+    expect(synth.offs).toHaveLength(2);
+    expect(synth.offs[0]).toBeCalledWith();
+    expect(synth.offs[1]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [176, 64, 0]}); // sustain up should not kill new note
+    expect(synth.offs[1]).not.toBeCalled();
+  });
 });
