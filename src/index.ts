@@ -19,6 +19,11 @@ const EXPIRED = 10000;
 // Cents offset tolerance for channel reuse.
 const EPSILON = 1e-6;
 
+export type MidiChannel = number;
+export type MidiNoteNumber = number;
+export type NoteIdentifier = number;
+export type RawVelocity = number;
+
 const DAMPERPEDAL = Utilities.getCcNumberByName('damperpedal');
 const SOSTENUTO = Utilities.getCcNumberByName('sostenuto');
 
@@ -32,7 +37,7 @@ if (DAMPERPEDAL === undefined || SOSTENUTO === undefined) {
  */
 export type Voice = {
   age: number;
-  channel: number;
+  channel: MidiChannel;
   centsOffset: number;
 };
 
@@ -43,9 +48,9 @@ export type Note = {
   /** Frequency in Hertz (Hz). */
   frequency: number;
   /** Attack velocity from 0 to 127. */
-  rawAttack?: number;
+  rawAttack?: RawVelocity;
   /** Release velocity from 0 to 127. */
-  rawRelease?: number;
+  rawRelease?: RawVelocity;
   /**
    * Note-on time in milliseconds (ms) as measured by `WebMidi.time`.
    *
@@ -79,7 +84,7 @@ export type MidiOutOptions = {
  */
 export class MidiOut {
   output: Output | null;
-  channels: Set<number>;
+  channels: Set<MidiChannel>;
   log: (msg: string) => void;
   private voices: Voice[];
   private lastEventTime: DOMHighResTimeStamp;
@@ -92,7 +97,7 @@ export class MidiOut {
    */
   constructor(
     output: Output | null,
-    channels: Set<number>,
+    channels: Set<MidiChannel>,
     options: MidiOutOptions = {},
   ) {
     this.output = output;
@@ -299,14 +304,14 @@ export class MidiOut {
 /**
  * Unique identifier for a note message in a specific channel.
  */
-function noteIdentifier(event: NoteMessageEvent) {
+function noteIdentifier(event: NoteMessageEvent): NoteIdentifier {
   return event.note.number + 128 * (event.message.channel - 1); // webmidi sends channels 1-16, but identifier only needs to range between 0 and (16 * 128) - 1 = 2047
 }
 
 /**
  * MIDI channel number (1-16) from a note identifier.
  */
-function channelFromIdentifier(identifier: number) {
+function channelFromIdentifier(identifier: NoteIdentifier): MidiChannel {
   return Math.floor(identifier / 128) + 1;
 }
 
@@ -316,9 +321,9 @@ function channelFromIdentifier(identifier: number) {
  * Must return a note-off callback (e.g. for turning off your synth).
  */
 export type NoteOnCallback = (
-  index: number,
-  rawAttack: number,
-  channel: number,
+  index: MidiNoteNumber,
+  rawAttack: RawVelocity,
+  channel: MidiChannel,
 ) => NoteOff;
 
 export type MidiInOptions = {
@@ -338,19 +343,19 @@ export type MidiInOptions = {
  */
 export class MidiIn {
   callback: NoteOnCallback;
-  channels: Set<number>;
+  channels: Set<MidiChannel>;
   /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
-  private noteOffMap: Map<number, NoteOff>;
+  private noteOffMap: Map<NoteIdentifier, NoteOff>;
   /** Deferred note-offs while pedals are holding notes. */
-  private deferredNoteOffMap: Map<number, number | undefined>;
+  private deferredNoteOffMap: Map<NoteIdentifier, RawVelocity | undefined>;
   /** Channels where hold pedal (CC64) is currently active. */
-  private holdPedalChannels: Set<number>;
+  private holdPedalChannels: Set<MidiChannel>;
   /** Channels where sostenuto pedal (CC66) is currently active. */
-  private sostenutoChannels: Set<number>;
+  private sostenutoChannels: Set<MidiChannel>;
   /** Note identifiers physically held down by keyboard state. */
-  private heldNoteIds: Set<number>;
+  private heldNoteIds: Set<NoteIdentifier>;
   /** Sostenuto-captured note identifiers by MIDI channel. */
-  private sostenutoNoteIdsByChannel: Map<number, Set<number>>;
+  private sostenutoNoteIdsByChannel: Map<MidiChannel, Set<NoteIdentifier>>;
   private sustainPedalEnabled: boolean;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
@@ -365,7 +370,7 @@ export class MidiIn {
    */
   constructor(
     callback: NoteOnCallback,
-    channels: Set<number>,
+    channels: Set<MidiChannel>,
     options: MidiInOptions = {},
   ) {
     this.callback = callback;
@@ -415,13 +420,13 @@ export class MidiIn {
   }
 
   private noteOn(event: NoteMessageEvent) {
-    const channel = event.message.channel;
+    const channel: MidiChannel = event.message.channel;
     if (!this.channels.has(channel)) {
       return;
     }
-    const noteNumber = event.note.number;
+    const noteNumber: MidiNoteNumber = event.note.number;
     const attack = event.note.attack;
-    const rawAttack = event.note.rawAttack;
+    const rawAttack: RawVelocity = event.note.rawAttack;
     // Some MIDI devices encode note-off as note-on with velocity 0.
     if (rawAttack === 0) {
       this.noteOff(event);
@@ -430,7 +435,7 @@ export class MidiIn {
     this.log(
       `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`,
     );
-    const id = noteIdentifier(event);
+    const id: NoteIdentifier = noteIdentifier(event);
     this.heldNoteIds.add(id);
     const existingNoteOff = this.noteOffMap.get(id);
     if (existingNoteOff !== undefined) {
@@ -445,17 +450,17 @@ export class MidiIn {
   }
 
   private noteOff(event: NoteMessageEvent) {
-    const channel = event.message.channel;
+    const channel: MidiChannel = event.message.channel;
     if (!this.channels.has(channel)) {
       return;
     }
-    const noteNumber = event.note.number;
+    const noteNumber: MidiNoteNumber = event.note.number;
     const release = event.note.release;
-    const rawRelease = event.note.rawRelease;
+    const rawRelease: RawVelocity = event.note.rawRelease;
     this.log(
       `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`,
     );
-    const id = noteIdentifier(event);
+    const id: NoteIdentifier = noteIdentifier(event);
     this.heldNoteIds.delete(id);
     if (this.sustainPedalEnabled && this.shouldDeferNoteOff(channel, id)) {
       this.deferredNoteOffMap.set(id, rawRelease);
@@ -465,7 +470,7 @@ export class MidiIn {
   }
 
   private controlChange(event: ControlChangeMessageEvent) {
-    const channel = event.message.channel;
+    const channel: MidiChannel = event.message.channel;
     if (!this.channels.has(channel)) {
       return;
     }
@@ -514,7 +519,7 @@ export class MidiIn {
     this.releaseDeferredNoteOffs(channel);
   }
 
-  private releaseDeferredNoteOffs(channel: number) {
+  private releaseDeferredNoteOffs(channel: MidiChannel) {
     for (const [id, rawRelease] of this.deferredNoteOffMap) {
       if (channelFromIdentifier(id) !== channel) {
         continue;
@@ -526,7 +531,7 @@ export class MidiIn {
     }
   }
 
-  private shouldDeferNoteOff(channel: number, id: number) {
+  private shouldDeferNoteOff(channel: MidiChannel, id: NoteIdentifier) {
     if (this.holdPedalChannels.has(channel)) {
       return true;
     }
@@ -536,7 +541,7 @@ export class MidiIn {
     );
   }
 
-  private getSostenutoNotes(channel: number) {
+  private getSostenutoNotes(channel: MidiChannel) {
     let notes = this.sostenutoNoteIdsByChannel.get(channel);
     if (notes === undefined) {
       notes = new Set();
@@ -545,7 +550,7 @@ export class MidiIn {
     return notes;
   }
 
-  private triggerNoteOff(id: number, rawRelease?: number) {
+  private triggerNoteOff(id: NoteIdentifier, rawRelease?: RawVelocity) {
     const noteOff = this.noteOffMap.get(id);
     if (noteOff !== undefined) {
       this.deferredNoteOffMap.delete(id);
