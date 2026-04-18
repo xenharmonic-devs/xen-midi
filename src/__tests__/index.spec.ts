@@ -251,4 +251,33 @@ describe('MIDI input wrapper', () => {
     mockInput.onmidimessage({data: [176, 66, 0]}); // sostenuto up releases held note
     expect(synth.offs[0]).toBeCalledWith(55);
   });
+
+  it('keeps hold and sostenuto deferred notes independent', () => {
+    const synth = new MockSynth();
+    const midiIn = new MidiIn(synth.noteOn.bind(synth), new Set([1]), {
+      sustainPedal: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    mockInput.onmidimessage({data: [144, 69, 100]}); // note to be captured by sostenuto
+    mockInput.onmidimessage({data: [176, 66, 127]}); // sostenuto down
+    mockInput.onmidimessage({data: [176, 64, 127]}); // hold pedal down
+
+    mockInput.onmidimessage({data: [128, 69, 50]}); // deferred by both pedals
+    expect(synth.offs[0]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [144, 70, 100]}); // note after sostenuto
+    mockInput.onmidimessage({data: [128, 70, 60]}); // deferred only by hold pedal
+    expect(synth.offs[1]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [176, 64, 0]}); // hold pedal up
+    expect(synth.offs[1]).toBeCalledWith(60); // released from hold-only defer
+    expect(synth.offs[0]).not.toBeCalled(); // still deferred by sostenuto
+
+    mockInput.onmidimessage({data: [176, 66, 0]}); // sostenuto up
+    expect(synth.offs[0]).toBeCalledWith(50);
+  });
 });
