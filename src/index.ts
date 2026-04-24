@@ -442,13 +442,22 @@ export class MidiIn {
     this.heldNoteIds.add(id);
     const existingNoteOff = this.noteOffMap.get(id);
     if (existingNoteOff !== undefined) {
+      this.noteOffMap.delete(id);
       if (this.sustainPedalEnabled) {
+        if (this.holdDeferredNoteOffMap.has(id)) {
+          existingNoteOff(this.holdDeferredNoteOffMap.get(id));
+        } else if (this.sostenutoDeferredNoteOffMap.has(id)) {
+          existingNoteOff(this.sostenutoDeferredNoteOffMap.get(id));
+        } else {
+          // Unspecified release velocity
+          existingNoteOff();
+        }
         this.holdDeferredNoteOffMap.delete(id);
         this.sostenutoDeferredNoteOffMap.delete(id);
-        this.getSostenutoNotes(channel).delete(id);
+      } else {
+        // Unspecified release velocity
+        existingNoteOff();
       }
-      this.noteOffMap.delete(id);
-      existingNoteOff();
     }
 
     const noteOff = this.callback(noteNumber, rawAttack, channel);

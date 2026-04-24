@@ -222,7 +222,7 @@ describe('MIDI input wrapper', () => {
 
     mockInput.onmidimessage({data: [144, 69, 80]}); // re-trigger same key
     expect(synth.offs).toHaveLength(2);
-    expect(synth.offs[0]).toBeCalledWith();
+    expect(synth.offs[0]).toBeCalledWith(45);
     expect(synth.offs[1]).not.toBeCalled();
 
     mockInput.onmidimessage({data: [176, 64, 0]}); // hold pedal up should not kill new note
@@ -279,5 +279,37 @@ describe('MIDI input wrapper', () => {
 
     mockInput.onmidimessage({data: [176, 66, 0]}); // sostenuto up
     expect(synth.offs[0]).toBeCalledWith(50);
+  });
+
+  it('maintains sostenuto when captured keys are re-pressed', () => {
+    const synth = new MockSynth();
+    const midiIn = new MidiIn(synth.noteOn.bind(synth), new Set([1]), {
+      sustainPedal: true,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockInput: any = {};
+    const input = new Input(mockInput);
+    midiIn.listen(input);
+
+    mockInput.onmidimessage({data: [144, 69, 100]}); // note to be captured by sostenuto
+    mockInput.onmidimessage({data: [176, 66, 127]}); // sostenuto down
+
+    mockInput.onmidimessage({data: [128, 69, 50]}); // note up deferred
+    expect(synth.offs[0]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [144, 69, 120]}); // note on causing re-trigger while maintaining capture
+    expect(synth.offs[0]).toBeCalledWith(50);
+
+    mockInput.onmidimessage({data: [128, 69, 60]}); // note up still deferred
+    expect(synth.offs[1]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [144, 69, 130]}); // note on causing re-trigger while maintaining capture
+    expect(synth.offs[1]).toBeCalledWith(60);
+
+    mockInput.onmidimessage({data: [128, 69, 70]}); // note up still deferred
+    expect(synth.offs[2]).not.toBeCalled();
+
+    mockInput.onmidimessage({data: [176, 66, 0]}); // sostenuto up
+    expect(synth.offs[2]).toBeCalledWith(70);
   });
 });
