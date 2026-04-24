@@ -442,9 +442,11 @@ export class MidiIn {
     this.heldNoteIds.add(id);
     const existingNoteOff = this.noteOffMap.get(id);
     if (existingNoteOff !== undefined) {
-      this.holdDeferredNoteOffMap.delete(id);
-      this.sostenutoDeferredNoteOffMap.delete(id);
-      this.getSostenutoNotes(channel).delete(id);
+      if (this.sustainPedalEnabled) {
+        this.holdDeferredNoteOffMap.delete(id);
+        this.sostenutoDeferredNoteOffMap.delete(id);
+        this.getSostenutoNotes(channel).delete(id);
+      }
       this.noteOffMap.delete(id);
       existingNoteOff();
     }
