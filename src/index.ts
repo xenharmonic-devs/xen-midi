@@ -514,11 +514,16 @@ export class MidiIn {
         return;
       }
       this.holdPedalChannels.delete(channel);
-      this.releaseDeferredFromMap(
-        channel,
-        this.holdDeferredNoteOffMap,
-        this.sostenutoDeferredNoteOffMap,
-      );
+      for (const [id, rawRelease] of this.holdDeferredNoteOffMap) {
+        if (channelFromIdentifier(id) !== channel) {
+          continue;
+        }
+        if (this.sostenutoDeferredNoteOffMap.has(id)) {
+          this.holdDeferredNoteOffMap.delete(id);
+          continue;
+        }
+        this.triggerNoteOff(id, rawRelease);
+      }
       return;
     }
     if (event.controller.number === SOSTENUTO && rawValue >= 64) {
@@ -567,23 +572,6 @@ export class MidiIn {
       }
     }
     captured.clear();
-  }
-
-  private releaseDeferredFromMap(
-    channel: MidiChannel,
-    sourceMap: Map<NoteIdentifier, RawVelocity>,
-    blockedByMap: Map<NoteIdentifier, RawVelocity>,
-  ) {
-    for (const [id, rawRelease] of sourceMap) {
-      if (channelFromIdentifier(id) !== channel) {
-        continue;
-      }
-      if (blockedByMap.has(id)) {
-        sourceMap.delete(id);
-        continue;
-      }
-      this.triggerNoteOff(id, rawRelease);
-    }
   }
 
   private deferNoteOff(
