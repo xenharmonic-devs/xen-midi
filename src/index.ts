@@ -444,18 +444,25 @@ export class MidiIn {
     if (existingNoteOff !== undefined) {
       this.noteOffMap.delete(id);
       if (this.sustainPedalEnabled) {
+        let rawRelease: number | undefined = undefined;
         if (this.holdDeferredNoteOffMap.has(id)) {
-          existingNoteOff(this.holdDeferredNoteOffMap.get(id));
+          rawRelease = this.holdDeferredNoteOffMap.get(id);
+          this.log(
+            `Triggering note-off at raw velocity ${rawRelease} deferred by hold pedal`,
+          );
         } else if (this.sostenutoDeferredNoteOffMap.has(id)) {
-          existingNoteOff(this.sostenutoDeferredNoteOffMap.get(id));
+          rawRelease = this.sostenutoDeferredNoteOffMap.get(id);
+          this.log(
+            `Triggering note-off at raw velocity ${rawRelease} deferred by sostenuto pedal`,
+          );
         } else {
-          // Unspecified release velocity
-          existingNoteOff();
+          this.log('Triggering note-off at unspecified velocity');
         }
+        existingNoteOff(rawRelease);
         this.holdDeferredNoteOffMap.delete(id);
         this.sostenutoDeferredNoteOffMap.delete(id);
       } else {
-        // Unspecified release velocity
+        this.log('Triggering note-off at unspecified velocity');
         existingNoteOff();
       }
     }
@@ -506,11 +513,13 @@ export class MidiIn {
             ? 127
             : 0;
     if (event.controller.number === DAMPERPEDAL && rawValue >= 64) {
+      this.log(`Hold pedal down on channel ${channel}`);
       this.holdPedalChannels.add(channel);
       return;
     }
     if (event.controller.number === DAMPERPEDAL && rawValue < 64) {
       if (!this.holdPedalChannels.has(channel)) {
+        this.log(`Hold pedal up on channel ${channel}`);
         return;
       }
       this.holdPedalChannels.delete(channel);
@@ -518,20 +527,24 @@ export class MidiIn {
         if (channelFromIdentifier(id) !== channel) {
           continue;
         }
-        if (this.sostenutoDeferredNoteOffMap.has(id)) {
+        if (this.deferNoteOff(channel, id, rawRelease)) {
           this.holdDeferredNoteOffMap.delete(id);
           continue;
         }
+        this.log(
+          `Triggering note-off at raw velocity ${rawRelease} on channel ${channel} deferred by hold pedal`,
+        );
         this.triggerNoteOff(id, rawRelease);
       }
       return;
     }
     if (event.controller.number === SOSTENUTO && rawValue >= 64) {
+      this.log(`Sostenuto pedal down on channel ${channel}`);
       this.sostenutoChannels.add(channel);
       const captured = this.getSostenutoNotes(channel);
       captured.clear();
       if (this.holdPedalChannels.has(channel)) {
-        // Capture everything
+        this.log(`Sostenuto capturing all notes on channel ${channel}`);
         for (let number = 0; number < 128; ++number) {
           captured.add(
             noteIdentifier({
@@ -543,19 +556,23 @@ export class MidiIn {
       } else {
         for (const id of this.heldNoteIds) {
           if (channelFromIdentifier(id) === channel) {
+            this.log(`Sostenuto capturing a note on channel ${channel}`);
             captured.add(id);
           }
         }
       }
       return;
     }
+    this.log(`Sostenuto pedal up on channel ${channel}`);
     if (!this.sostenutoChannels.has(channel)) {
       return;
     }
     this.sostenutoChannels.delete(channel);
     const captured = this.getSostenutoNotes(channel);
     if (this.holdPedalChannels.has(channel)) {
-      // Migrate captured notes
+      this.log(
+        `Migrating held notes from hold pedal to sostenuto on channel ${channel}`,
+      );
       for (const id of captured) {
         this.holdDeferredNoteOffMap.set(
           id,
@@ -568,6 +585,9 @@ export class MidiIn {
         if (channelFromIdentifier(id) !== channel) {
           continue;
         }
+        this.log(
+          `Triggering note-off at raw velocity ${rawRelease} on channel ${channel} deferred by sostenuto pedal`,
+        );
         this.triggerNoteOff(id, rawRelease);
       }
     }
@@ -579,23 +599,29 @@ export class MidiIn {
     id: NoteIdentifier,
     rawRelease: RawVelocity,
   ) {
-    let deferred = false;
-    if (this.holdPedalChannels.has(channel)) {
-      this.holdDeferredNoteOffMap.set(id, rawRelease);
-      deferred = true;
-    } else {
-      this.holdDeferredNoteOffMap.delete(id);
-    }
     if (
       this.sostenutoChannels.has(channel) &&
       this.getSostenutoNotes(channel).has(id)
     ) {
+      this.log(
+        `Deferring note off at raw velocity ${rawRelease} on channel ${channel} due to sostenuto`,
+      );
       this.sostenutoDeferredNoteOffMap.set(id, rawRelease);
-      deferred = true;
+      this.holdDeferredNoteOffMap.delete(id);
+      return true;
     } else {
       this.sostenutoDeferredNoteOffMap.delete(id);
     }
-    return deferred;
+    if (this.holdPedalChannels.has(channel)) {
+      this.log(
+        `Deferring note off at raw velocity ${rawRelease} on channel ${channel} due to hold pedal`,
+      );
+      this.holdDeferredNoteOffMap.set(id, rawRelease);
+      return true;
+    } else {
+      this.holdDeferredNoteOffMap.delete(id);
+    }
+    return false;
   }
 
   private getSostenutoNotes(channel: MidiChannel) {
