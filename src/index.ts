@@ -525,9 +525,21 @@ export class MidiIn {
       this.sostenutoChannels.add(channel);
       const captured = this.getSostenutoNotes(channel);
       captured.clear();
-      for (const id of this.heldNoteIds) {
-        if (channelFromIdentifier(id) === channel) {
-          captured.add(id);
+      if (this.holdPedalChannels.has(channel)) {
+        // Capture everything
+        for (let number = 0; number < 128; ++number) {
+          captured.add(
+            noteIdentifier({
+              note: {number},
+              message: {channel},
+            } as NoteMessageEvent),
+          );
+        }
+      } else {
+        for (const id of this.heldNoteIds) {
+          if (channelFromIdentifier(id) === channel) {
+            captured.add(id);
+          }
         }
       }
       return;
@@ -536,12 +548,25 @@ export class MidiIn {
       return;
     }
     this.sostenutoChannels.delete(channel);
-    this.getSostenutoNotes(channel).clear();
-    this.releaseDeferredFromMap(
-      channel,
-      this.sostenutoDeferredNoteOffMap,
-      this.holdDeferredNoteOffMap,
-    );
+    const captured = this.getSostenutoNotes(channel);
+    if (this.holdPedalChannels.has(channel)) {
+      // Migrate captured notes
+      for (const id of captured) {
+        this.holdDeferredNoteOffMap.set(
+          id,
+          this.sostenutoDeferredNoteOffMap.get(id)!,
+        );
+        this.sostenutoDeferredNoteOffMap.delete(id);
+      }
+    } else {
+      for (const [id, rawRelease] of this.sostenutoDeferredNoteOffMap) {
+        if (channelFromIdentifier(id) !== channel) {
+          continue;
+        }
+        this.triggerNoteOff(id, rawRelease);
+      }
+    }
+    captured.clear();
   }
 
   private releaseDeferredFromMap(
