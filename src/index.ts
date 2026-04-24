@@ -1,4 +1,11 @@
-import {NoteMessageEvent, Output, Input, WebMidi} from 'webmidi';
+import {
+  ControlChangeMessageEvent,
+  NoteMessageEvent,
+  Output,
+  Input,
+  Utilities,
+  WebMidi,
+} from 'webmidi';
 import {ftom} from 'xen-dev-utils/conversion';
 
 /**
@@ -12,13 +19,25 @@ const EXPIRED = 10000;
 // Cents offset tolerance for channel reuse.
 const EPSILON = 1e-6;
 
+export type MidiChannel = number;
+export type MidiNoteNumber = number;
+export type NoteIdentifier = number;
+export type RawVelocity = number;
+
+const DAMPERPEDAL = Utilities.getCcNumberByName('damperpedal');
+const SOSTENUTO = Utilities.getCcNumberByName('sostenuto');
+
+if (DAMPERPEDAL === undefined || SOSTENUTO === undefined) {
+  throw new Error('Failed to resolve pedal controller numbers from webmidi.');
+}
+
 /**
  * Abstraction for a pitch-bent midi channel.
  * Polyphonic in pure octaves and 12edo in general.
  */
 export type Voice = {
   age: number;
-  channel: number;
+  channel: MidiChannel;
   centsOffset: number;
 };
 
@@ -29,9 +48,9 @@ export type Note = {
   /** Frequency in Hertz (Hz). */
   frequency: number;
   /** Attack velocity from 0 to 127. */
-  rawAttack?: number;
+  rawAttack?: RawVelocity;
   /** Release velocity from 0 to 127. */
-  rawRelease?: number;
+  rawRelease?: RawVelocity;
   /**
    * Note-on time in milliseconds (ms) as measured by `WebMidi.time`.
    *
@@ -52,13 +71,20 @@ function emptyNoteOff(rawRelease?: number, time?: DOMHighResTimeStamp) {}
  */
 export type NoteOff = typeof emptyNoteOff;
 
+export type MidiOutOptions = {
+  /**
+   * Optional logger for outgoing MIDI note events.
+   */
+  log?: (msg: string) => void;
+};
+
 /**
  * Wrapper for a webmidi.js output.
  * Uses multiple channels to achieve polyphonic microtuning.
  */
 export class MidiOut {
   output: Output | null;
-  channels: Set<number>;
+  channels: Set<MidiChannel>;
   log: (msg: string) => void;
   private voices: Voice[];
   private lastEventTime: DOMHighResTimeStamp;
@@ -67,20 +93,20 @@ export class MidiOut {
    * Construct a new wrapper for a webmidi.js output.
    * @param output Output device or `null` if you need a dummy out.
    * @param channels Channels to use for sending pitch bent MIDI notes. Number of channels determines maximum microtonal polyphony.
-   * @param log Logging function.
+   * @param options Optional output behavior flags and logger.
    */
   constructor(
     output: Output | null,
-    channels: Set<number>,
-    log?: (msg: string) => void,
+    channels: Set<MidiChannel>,
+    options: MidiOutOptions = {},
   ) {
     this.output = output;
     this.channels = channels;
-    if (log === undefined) {
+    if (options.log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.log = msg => {};
     } else {
-      this.log = log;
+      this.log = options.log;
     }
 
     this.voices = [];
@@ -278,8 +304,15 @@ export class MidiOut {
 /**
  * Unique identifier for a note message in a specific channel.
  */
-function noteIdentifier(event: NoteMessageEvent) {
+function noteIdentifier(event: NoteMessageEvent): NoteIdentifier {
   return event.note.number + 128 * (event.message.channel - 1); // webmidi sends channels 1-16, but identifier only needs to range between 0 and (16 * 128) - 1 = 2047
+}
+
+/**
+ * MIDI channel number (1-16) from a note identifier.
+ */
+function channelFromIdentifier(identifier: NoteIdentifier): MidiChannel {
+  return Math.floor(identifier / 128) + 1;
 }
 
 /**
@@ -288,10 +321,21 @@ function noteIdentifier(event: NoteMessageEvent) {
  * Must return a note-off callback (e.g. for turning off your synth).
  */
 export type NoteOnCallback = (
-  index: number,
-  rawAttack: number,
-  channel: number,
+  index: MidiNoteNumber,
+  rawAttack: RawVelocity,
+  channel: MidiChannel,
 ) => NoteOff;
+
+export type MidiInOptions = {
+  /**
+   * If true, hold pedal (CC64, sustain) and sostenuto (CC66) can delay note-off callbacks.
+   */
+  sustainPedal?: boolean;
+  /**
+   * Optional logger for incoming MIDI note events.
+   */
+  log?: (msg: string) => void;
+};
 
 /**
  * Wrapper for webmidi.js input.
@@ -299,36 +343,58 @@ export type NoteOnCallback = (
  */
 export class MidiIn {
   callback: NoteOnCallback;
-  channels: Set<number>;
+  channels: Set<MidiChannel>;
   /** Note-off map from (noteNumber + (midiChannel - 1) * 128) to callbacks.  */
-  private noteOffMap: Map<number, NoteOff>;
+  private noteOffMap: Map<NoteIdentifier, NoteOff>;
+  /** Deferred note-offs held by hold pedal (CC64). */
+  private holdDeferredNoteOffMap: Map<NoteIdentifier, RawVelocity>;
+  /** Deferred note-offs held by sostenuto pedal (CC66). */
+  private sostenutoDeferredNoteOffMap: Map<NoteIdentifier, RawVelocity>;
+  /** Channels where hold pedal (CC64) is currently active. */
+  private holdPedalChannels: Set<MidiChannel>;
+  /** Channels where sostenuto pedal (CC66) is currently active. */
+  private sostenutoChannels: Set<MidiChannel>;
+  /** Note identifiers physically held down by keyboard state. */
+  private heldNoteIds: Set<NoteIdentifier>;
+  /** Sostenuto-captured note identifiers by MIDI channel. */
+  private sostenutoNoteIdsByChannel: Map<MidiChannel, Set<NoteIdentifier>>;
+  private sustainPedalEnabled: boolean;
   private _noteOn: (event: NoteMessageEvent) => void;
   private _noteOff: (event: NoteMessageEvent) => void;
+  private _controlChange: (event: ControlChangeMessageEvent) => void;
   log: (msg: string) => void;
 
   /**
    * Construct a new wrapper for a webmidi.js input device.
    * @param callback Function to call when a note-on event is received on any of the available channels.
    * @param channels Channels to listen on.
-   * @param log Logging function.
+   * @param options Optional MIDI input behavior flags and logger.
    */
   constructor(
     callback: NoteOnCallback,
-    channels: Set<number>,
-    log?: (msg: string) => void,
+    channels: Set<MidiChannel>,
+    options: MidiInOptions = {},
   ) {
     this.callback = callback;
     this.channels = channels;
+    this.sustainPedalEnabled = options.sustainPedal === true;
     this.noteOffMap = new Map();
+    this.holdDeferredNoteOffMap = new Map();
+    this.sostenutoDeferredNoteOffMap = new Map();
+    this.holdPedalChannels = new Set();
+    this.sostenutoChannels = new Set();
+    this.heldNoteIds = new Set();
+    this.sostenutoNoteIdsByChannel = new Map();
 
     this._noteOn = this.noteOn.bind(this);
     this._noteOff = this.noteOff.bind(this);
+    this._controlChange = this.controlChange.bind(this);
 
-    if (log === undefined) {
+    if (options.log === undefined) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.log = msg => {};
     } else {
-      this.log = log;
+      this.log = options.log;
     }
   }
 
@@ -339,6 +405,9 @@ export class MidiIn {
   listen(input: Input) {
     input.addListener('noteon', this._noteOn);
     input.addListener('noteoff', this._noteOff);
+    if (this.sustainPedalEnabled) {
+      input.addListener('controlchange', this._controlChange);
+    }
   }
 
   /**
@@ -348,16 +417,19 @@ export class MidiIn {
   unlisten(input: Input) {
     input.removeListener('noteon', this._noteOn);
     input.removeListener('noteoff', this._noteOff);
+    if (this.sustainPedalEnabled) {
+      input.removeListener('controlchange', this._controlChange);
+    }
   }
 
   private noteOn(event: NoteMessageEvent) {
-    const channel = event.message.channel;
+    const channel: MidiChannel = event.message.channel;
     if (!this.channels.has(channel)) {
       return;
     }
-    const noteNumber = event.note.number;
+    const noteNumber: MidiNoteNumber = event.note.number;
     const attack = event.note.attack;
-    const rawAttack = event.note.rawAttack;
+    const rawAttack: RawVelocity = event.note.rawAttack;
     // Some MIDI devices encode note-off as note-on with velocity 0.
     if (rawAttack === 0) {
       this.noteOff(event);
@@ -366,11 +438,26 @@ export class MidiIn {
     this.log(
       `Midi note on ${noteNumber} at velocity ${attack} on channel ${channel}`,
     );
-    const id = noteIdentifier(event);
+    const id: NoteIdentifier = noteIdentifier(event);
+    this.heldNoteIds.add(id);
     const existingNoteOff = this.noteOffMap.get(id);
     if (existingNoteOff !== undefined) {
       this.noteOffMap.delete(id);
-      existingNoteOff();
+      if (this.sustainPedalEnabled) {
+        if (this.holdDeferredNoteOffMap.has(id)) {
+          existingNoteOff(this.holdDeferredNoteOffMap.get(id));
+        } else if (this.sostenutoDeferredNoteOffMap.has(id)) {
+          existingNoteOff(this.sostenutoDeferredNoteOffMap.get(id));
+        } else {
+          // Unspecified release velocity
+          existingNoteOff();
+        }
+        this.holdDeferredNoteOffMap.delete(id);
+        this.sostenutoDeferredNoteOffMap.delete(id);
+      } else {
+        // Unspecified release velocity
+        existingNoteOff();
+      }
     }
 
     const noteOff = this.callback(noteNumber, rawAttack, channel);
@@ -378,19 +465,153 @@ export class MidiIn {
   }
 
   private noteOff(event: NoteMessageEvent) {
-    const channel = event.message.channel;
+    const channel: MidiChannel = event.message.channel;
     if (!this.channels.has(channel)) {
       return;
     }
-    const noteNumber = event.note.number;
+    const noteNumber: MidiNoteNumber = event.note.number;
     const release = event.note.release;
-    const rawRelease = event.note.rawRelease;
+    const rawRelease: RawVelocity = event.note.rawRelease;
     this.log(
       `Midi note off ${noteNumber} at velocity ${release} on channel ${channel}`,
     );
-    const id = noteIdentifier(event);
+    const id: NoteIdentifier = noteIdentifier(event);
+    this.heldNoteIds.delete(id);
+    if (
+      this.sustainPedalEnabled &&
+      this.deferNoteOff(channel, id, rawRelease)
+    ) {
+      return;
+    }
+    this.triggerNoteOff(id, rawRelease);
+  }
+
+  private controlChange(event: ControlChangeMessageEvent) {
+    const channel: MidiChannel = event.message.channel;
+    if (!this.channels.has(channel)) {
+      return;
+    }
+    if (
+      event.controller.number !== DAMPERPEDAL &&
+      event.controller.number !== SOSTENUTO
+    ) {
+      return;
+    }
+    const rawValue =
+      typeof event.rawValue === 'number'
+        ? event.rawValue
+        : typeof event.value === 'number'
+          ? event.value
+          : event.value === true
+            ? 127
+            : 0;
+    if (event.controller.number === DAMPERPEDAL && rawValue >= 64) {
+      this.holdPedalChannels.add(channel);
+      return;
+    }
+    if (event.controller.number === DAMPERPEDAL && rawValue < 64) {
+      if (!this.holdPedalChannels.has(channel)) {
+        return;
+      }
+      this.holdPedalChannels.delete(channel);
+      for (const [id, rawRelease] of this.holdDeferredNoteOffMap) {
+        if (channelFromIdentifier(id) !== channel) {
+          continue;
+        }
+        if (this.sostenutoDeferredNoteOffMap.has(id)) {
+          this.holdDeferredNoteOffMap.delete(id);
+          continue;
+        }
+        this.triggerNoteOff(id, rawRelease);
+      }
+      return;
+    }
+    if (event.controller.number === SOSTENUTO && rawValue >= 64) {
+      this.sostenutoChannels.add(channel);
+      const captured = this.getSostenutoNotes(channel);
+      captured.clear();
+      if (this.holdPedalChannels.has(channel)) {
+        // Capture everything
+        for (let number = 0; number < 128; ++number) {
+          captured.add(
+            noteIdentifier({
+              note: {number},
+              message: {channel},
+            } as NoteMessageEvent),
+          );
+        }
+      } else {
+        for (const id of this.heldNoteIds) {
+          if (channelFromIdentifier(id) === channel) {
+            captured.add(id);
+          }
+        }
+      }
+      return;
+    }
+    if (!this.sostenutoChannels.has(channel)) {
+      return;
+    }
+    this.sostenutoChannels.delete(channel);
+    const captured = this.getSostenutoNotes(channel);
+    if (this.holdPedalChannels.has(channel)) {
+      // Migrate captured notes
+      for (const id of captured) {
+        this.holdDeferredNoteOffMap.set(
+          id,
+          this.sostenutoDeferredNoteOffMap.get(id)!,
+        );
+        this.sostenutoDeferredNoteOffMap.delete(id);
+      }
+    } else {
+      for (const [id, rawRelease] of this.sostenutoDeferredNoteOffMap) {
+        if (channelFromIdentifier(id) !== channel) {
+          continue;
+        }
+        this.triggerNoteOff(id, rawRelease);
+      }
+    }
+    captured.clear();
+  }
+
+  private deferNoteOff(
+    channel: MidiChannel,
+    id: NoteIdentifier,
+    rawRelease: RawVelocity,
+  ) {
+    let deferred = false;
+    if (this.holdPedalChannels.has(channel)) {
+      this.holdDeferredNoteOffMap.set(id, rawRelease);
+      deferred = true;
+    } else {
+      this.holdDeferredNoteOffMap.delete(id);
+    }
+    if (
+      this.sostenutoChannels.has(channel) &&
+      this.getSostenutoNotes(channel).has(id)
+    ) {
+      this.sostenutoDeferredNoteOffMap.set(id, rawRelease);
+      deferred = true;
+    } else {
+      this.sostenutoDeferredNoteOffMap.delete(id);
+    }
+    return deferred;
+  }
+
+  private getSostenutoNotes(channel: MidiChannel) {
+    let notes = this.sostenutoNoteIdsByChannel.get(channel);
+    if (notes === undefined) {
+      notes = new Set();
+      this.sostenutoNoteIdsByChannel.set(channel, notes);
+    }
+    return notes;
+  }
+
+  private triggerNoteOff(id: NoteIdentifier, rawRelease?: RawVelocity) {
     const noteOff = this.noteOffMap.get(id);
     if (noteOff !== undefined) {
+      this.holdDeferredNoteOffMap.delete(id);
+      this.sostenutoDeferredNoteOffMap.delete(id);
       this.noteOffMap.delete(id);
       noteOff(rawRelease);
     }
@@ -404,6 +625,12 @@ export class MidiIn {
       this.noteOffMap.delete(id);
       noteOff(80);
     }
+    this.holdDeferredNoteOffMap.clear();
+    this.sostenutoDeferredNoteOffMap.clear();
+    this.heldNoteIds.clear();
+    this.holdPedalChannels.clear();
+    this.sostenutoChannels.clear();
+    this.sostenutoNoteIdsByChannel.clear();
   }
 }
 
