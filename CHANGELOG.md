@@ -1,5 +1,9 @@
 # Change log
 
+## 0.4.0
+ * Use dedicated options objects for loggers and future features
+ * Add optional support for handling sostenute/damper pedal in-software by deferring note-offs. Enabled by passing `{sustainPedal: true}` to `MidiIn`.
+
 ## 0.3.1
  * Switch TypeScript to nodenext and enable ESM package mode
 
